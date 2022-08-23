@@ -1,10 +1,12 @@
+from multiprocessing import context
 import re
 from django.shortcuts import render, redirect
 from django.http import HttpResponse
 from django.contrib.auth.models import User, auth
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from .models import Profile
+from .models import Profile, Post, LikePost
+from django.contrib.auth import login, logout, authenticate
 # Create your views here.
 
 
@@ -12,11 +14,15 @@ from .models import Profile
 def index(request):
     user_object = User.objects.get(username = request.user.username)
     user_profile = Profile.objects.get(user=user_object)
-    return render(request,'index.html',{'user_profile':user_profile})
+    
+    posts = Post.objects.all()
+    return render(request,'index.html',{
+        'user_profile':user_profile,'posts':posts})
 
 
 @login_required(login_url='signin')
 def settings(request):
+    
     user_profile = Profile.objects.get(user=request.user)
     
     if request.method == 'POST':
@@ -62,8 +68,9 @@ def signup(request):
                     username=username, email=email, password=password)
                 user.save()
                 #loga usuario e redireciona para pagina de configurações 
-                user_login = auth.authenticate(username=username, password=password)
-                auth.login(request, user_login)
+                user_login = authenticate(username=username, password=password)
+                if user_login is not None:
+                    login(request, user_login)
                 
                 #cria um objeto perfil para um novo usuario
                 user_model = User.objects.get(username=username)
@@ -85,9 +92,9 @@ def signin(request):
         username = request.POST['username']
         password = request.POST['password']
         
-        user = auth.authenticated(username=username, password=password)
+        user = authenticate(username=username, password=password)
         if user is not None:
-            auth.login(request, user)
+            login(request, user)
             return redirect('/')
         else:
             messages.info(request,'Credenciais Inválidas')
@@ -103,6 +110,48 @@ def logout(request):
 
 @login_required(login_url='signin')
 def upload(request):
-    user_object = User.objects.get(username = request.user.username)
+    if request.method == 'POST':
+        user = request.user.username
+        image = request.FILES.get('image_upload')
+        caption = request.POST['caption']
+        
+        new_post = Post.objects.create(user=user, image=image, caption=caption)
+        new_post.save()
+        return redirect('/')
+    else:
+        return redirect('/')
+ 
+@login_required(login_url='signin')    
+def like_post(request):
+    username = request.user.username
+    post_id = request.GET.get('post_id')
+    
+    post = Post.objects.get(id=post_id)
+    
+    liker_filter = LikePost.objects.filter(post_id=post_id, username=username).first()
+
+    if liker_filter == None:
+        new_like = LikePost.objects.create(post_id=post_id, username=username)
+        new_like.save()
+        post.no_of_likes = post.no_of_likes + 1
+        post.save()
+        return redirect('/')
+    else:
+        liker_filter.delete()
+        post.no_of_likes = post.no_of_likes - 1
+        post.save()
+        return redirect('/')
+  
+@login_required(login_url='signin')           
+def profile(request, pk):
+    user_object = User.objects.get(username=pk)
     user_profile = Profile.objects.get(user=user_object)
-    return HttpResponse('<h1>Uoload</h1>')
+    user_posts = Post.objects.filter(user=pk)
+    user_posts_len = len(user_posts)
+    context = {
+        'user_object':user_object,
+        'user_profile':user_profile,
+        'user_posts':user_posts,
+        'user_posts_len':user_posts_len
+    }
+    return render(request,'profile.html', context)
